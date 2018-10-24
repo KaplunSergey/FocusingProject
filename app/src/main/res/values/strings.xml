@@ -1,4 +1,8 @@
 <resources>
     <string name="app_name">Focusing Project</string>
     <string name="record">Record</string>
+    <string name="stop">Stop</string>
+    <string name="manual">Manual</string>
+    <string name="auto">Auto</string>
+
 </resources>

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.example.focusingproject;
+package com.example.focusingproject.camera;
 
 import android.content.Context;
 import android.util.AttributeSet;
