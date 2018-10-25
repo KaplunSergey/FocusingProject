@@ -20,7 +20,6 @@ import com.example.focusingproject.VideoFilesManager;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -53,7 +52,7 @@ public class CameraProvider {
     private AutoFitTextureView textureView;
     private CameraDevice cameraDevice;
     private CameraCaptureSession previewSession;
-    private CameraCharacteristics cameraCharacteristics;
+    private Float minFocusDistance;
     private Size previewSize;
     private Size videoSize;
     private MediaRecorder mediaRecorder;
@@ -66,6 +65,10 @@ public class CameraProvider {
 
     private int requiredWidth;
     private int requiredHeight;
+
+    private boolean focusDistanceAuto;
+    private boolean isRecordingVideo;
+    private int frameCount;
 
     private Semaphore cameraOpenCloseLock = new Semaphore(1);
 
@@ -110,13 +113,9 @@ public class CameraProvider {
                 public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
                     previewSession = cameraCaptureSession;
                     updatePreview();
-                    activity.runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            statusCallback.startRecordingVideo();
-                            mediaRecorder.start();
-                        }
-                    });
+                    statusCallback.startRecordingVideo();
+                    isRecordingVideo = true;
+                    mediaRecorder.start();
                 }
 
                 @Override
@@ -124,6 +123,7 @@ public class CameraProvider {
                     statusCallback.showMessage("onConfigureFailed");
                 }
             }, backgroundHandler);
+
         } catch (CameraAccessException | IOException e) {
             e.printStackTrace();
         }
@@ -135,6 +135,8 @@ public class CameraProvider {
         mediaRecorder.stop();
         mediaRecorder.reset();
 
+        frameCount = 0;
+        isRecordingVideo = false;
         statusCallback.showMessage("Video saved: " + filesManager.getVideoPath());
         startPreview();
     }
@@ -158,20 +160,21 @@ public class CameraProvider {
     }
 
     public void changeFocusDistance(int progress) {
-        Float minFocusDistance = cameraCharacteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
         if (minFocusDistance == null) {
             return;
         }
 
         float focusDistance = progress * minFocusDistance / 100;
-        filesManager.writeFocusDistance(focusDistance);
-
         previewBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance);
         try {
-            previewSession.setRepeatingRequest(previewBuilder.build(), null, backgroundHandler);
+            previewSession.setRepeatingRequest(previewBuilder.build(), captureCallback, backgroundHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }
+
+    public void changeFocusDistanceAuto(boolean focusDistanceAuto) {
+        this.focusDistanceAuto = focusDistanceAuto;
     }
 
     @SuppressWarnings("MissingPermission")
@@ -183,8 +186,8 @@ public class CameraProvider {
                 throw new RuntimeException("Time out waiting to lock camera opening.");
             }
             String cameraId = manager.getCameraIdList()[0];
-            cameraCharacteristics = manager.getCameraCharacteristics(cameraId);
-
+            minFocusDistance = manager.getCameraCharacteristics(cameraId).
+                    get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
             // Choose the sizes for camera preview and video recording
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
             StreamConfigurationMap map = characteristics
@@ -304,7 +307,7 @@ public class CameraProvider {
             setUpCaptureRequestBuilder(previewBuilder);
             HandlerThread thread = new HandlerThread("CameraPreview");
             thread.start();
-            previewSession.setRepeatingRequest(previewBuilder.build(), null, backgroundHandler);
+            previewSession.setRepeatingRequest(previewBuilder.build(), captureCallback, backgroundHandler);
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
@@ -389,6 +392,43 @@ public class CameraProvider {
 
     };
 
+    private CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
+
+        @Override
+        public void onCaptureStarted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, long timestamp, long frameNumber) {
+            super.onCaptureStarted(session, request, timestamp, frameNumber);
+
+            if (minFocusDistance != null && focusDistanceAuto) {
+                autoFocusDistance();
+            }
+
+        }
+
+        @Override
+        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+            super.onCaptureCompleted(session, request, result);
+            if (!isRecordingVideo) {
+                return;
+            }
+
+            filesManager.writeFocusDistance(previewBuilder.get(CaptureRequest.LENS_FOCUS_DISTANCE));
+        }
+    };
+
+    private void autoFocusDistance() {
+        float focusDistance = frameCount * minFocusDistance / 100;
+        if (focusDistance >= minFocusDistance) {
+            frameCount = 0;
+        }
+        previewBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, focusDistance);
+        try {
+            previewSession.setRepeatingRequest(previewBuilder.build(), captureCallback, backgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+        frameCount++;
+    }
+
     private CameraDevice.StateCallback stateCallback = new CameraDevice.StateCallback() {
 
         @Override
@@ -417,14 +457,5 @@ public class CameraProvider {
         }
 
     };
-
-    static class CompareSizesByArea implements Comparator<Size> {
-
-        @Override
-        public int compare(Size lhs, Size rhs) {
-            return Long.signum((long) lhs.getWidth() * lhs.getHeight() - (long) rhs.getWidth() * rhs.getHeight());
-        }
-
-    }
 
 }

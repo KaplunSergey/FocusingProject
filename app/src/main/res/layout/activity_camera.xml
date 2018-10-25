@@ -15,6 +15,17 @@
             app:layout_constraintBottom_toTopOf="@id/vgButtonContainer"
     />
 
+    <TextView
+            android:id="@+id/mode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/manual"
+            android:padding="10dp"
+            android:textSize="16sp"
+            android:background="#404285f4"
+            app:layout_constraintEnd_toEndOf="parent"
+    />
+
     <LinearLayout
             android:id="@+id/vgButtonContainer"
             app:layout_constraintStart_toStartOf="parent"
